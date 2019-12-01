@@ -14,11 +14,11 @@ main = do
   putStrLn $ "Part 2: " <> calculateWith fuelRequiredPartTwo
 
 fuelRequired :: Integer -> Integer
-fuelRequired mass = (mass `div` 3) - 2
+fuelRequired mass = mass `div` 3 - 2
 
 fuelRequiredPartTwo :: Integer -> Integer
 fuelRequiredPartTwo mass =
-  let fuel = (mass `div` 3) - 2
+  let fuel = mass `div` 3 - 2
    in if fuel <= 0
         then 0
-        else fuel + (fuelRequiredPartTwo fuel)
+        else fuel + fuelRequiredPartTwo fuel
