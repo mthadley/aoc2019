@@ -8,8 +8,7 @@ import Text.Read (readMaybe)
 
 main :: IO ()
 main = do
-  let readInteger = readMaybe :: String -> Maybe Integer
-  masses <- mapMaybe readInteger <$> lines <$> readFile "Day1-input.txt"
+  masses <- mapMaybe readMaybe <$> lines <$> readFile "Day1-input.txt"
   let calculateWith f = show $ sum $ f <$> masses
   putStrLn $ "Part 1: " <> calculateWith fuelRequired
   putStrLn $ "Part 2: " <> calculateWith fuelRequiredPartTwo
