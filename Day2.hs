@@ -45,4 +45,4 @@ main = do
     Right codes -> do
       let codesBeforeFire = S.update 1 12 $ S.update 2 2 codes
       putText $ "Part 1: " <> (T.pack $ show $ S.index (run codesBeforeFire) 0)
-      putText $ "Part 1: " <> (T.pack $ show $ partTwo codes)
+      putText $ "Part 2: " <> (T.pack $ show $ partTwo codes)
