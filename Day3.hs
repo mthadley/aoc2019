@@ -1,11 +1,7 @@
 #!/usr/bin/env stack
 {- stack script --resolver lts-14.15 --ghc-options -Wall -}
-{-# LANGUAGE NoImplicitPrelude #-}
-
 import Control.Monad (fail)
 import qualified Data.Set as S
-import Prelude (foldl1, read)
-import Protolude
 import qualified Text.Parsec as P
 import Text.Parsec.Char as PC
 import Text.Parsec.Text (Parser, parseFromFile)
