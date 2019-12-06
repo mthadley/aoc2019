@@ -33,16 +33,18 @@ decodeInstruction :: Int -> Either Int Instruction
 decodeInstruction i =
   let mode :: Int -> PMode
       mode p =
-        if i `div` (10 ^ (p - 1)) `mod` 10 > 0
+        if i `div` (10 ^ (p + 1)) `mod` 10 > 0
           then Immediate
           else Position
    in case i `mod` 100 of
-        1 -> Right $ Add (mode 3) (mode 4)
-        2 -> Right $ Multiply (mode 3) (mode 4)
+        1 -> Right $ Add (mode 1) (mode 2)
+        2 -> Right $ Multiply (mode 1) (mode 2)
         3 -> Right $ Save
-        4 -> Right $ Output (mode 3)
-        5 -> Right $ JumpIfTrue (mode 3) (mode 4)
-        6 -> Right $ JumpIfFalse (mode 3) (mode 4)
+        4 -> Right $ Output (mode 1)
+        5 -> Right $ JumpIfTrue (mode 1) (mode 2)
+        6 -> Right $ JumpIfFalse (mode 1) (mode 2)
+        7 -> Right $ LessThan (mode 1) (mode 2)
+        8 -> Right $ Equals (mode 1) (mode 2)
         99 -> Right Halt
         badCode -> Left badCode
 
@@ -63,7 +65,7 @@ run input =
               let val = readWithMode aMode (pc + 1)
                   nextPC =
                     if f val
-                      then readWithMode jMode (pc + 1)
+                      then readWithMode jMode (pc + 2)
                       else pc + 3
                in runHelp nextPC codes
             compareWith f aMode bMode =
