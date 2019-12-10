@@ -2,7 +2,7 @@
 {- stack script --resolver lts-14.16 --ghc-options -Wall -}
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
 
-import qualified Data.Sequence as S
+import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Text.Read (decimal, signed)
 import Protolude
@@ -39,11 +39,11 @@ data Program
 data Machine = Machine
   { pc_ :: Int
   , base_ :: Int
-  , codes_ :: S.Seq Int -- TODO: Switch to a map. Data.HashMap?
+  , codes_ :: M.Map Int Int
   }
 
-fromCodes :: S.Seq Int -> Program
-fromCodes = Unstarted . Machine 0 0
+fromCodes :: [Int] -> Program
+fromCodes = Unstarted . Machine 0 0 . M.fromList . zipWith (,) [0 ..]
 
 data Reason
   = Done
@@ -79,20 +79,21 @@ decodeInstruction i =
 run :: [Int] -> Program -> Program
 run originalInputs program =
   let runHelp inputs machine@(Machine pc base codes) =
-        let readWithMode mode pos =
-              let val = S.index codes pos
+        let readMem pos = fromMaybe 0 $ M.lookup pos codes
+            readWithMode mode pos =
+              let val = readMem pos
                in case mode of
-                    Position -> S.index codes val
+                    Position -> readMem val
                     Immediate -> val
-                    Relative -> S.index codes (val + base)
+                    Relative -> readMem (val + base)
             runWith f aMode bMode =
               let inputA = readWithMode aMode $ pc + 1
                   inputB = readWithMode bMode $ pc + 2
-                  output = S.index codes $ pc + 3
+                  output = readMem $ pc + 3
                in runHelp inputs $
                   machine
                     { pc_ = pc + 4
-                    , codes_ = S.update output (f inputA inputB) codes
+                    , codes_ = M.insert output (f inputA inputB) codes
                     }
             jumpWith f aMode jMode =
               let val = readWithMode aMode (pc + 1)
@@ -107,10 +108,10 @@ run originalInputs program =
                         readWithMode bMode (pc + 2))
                       then 1
                       else 0
-                  addr = S.index codes $ pc + 3
+                  addr = readMem $ pc + 3
                in runHelp inputs $
-                  machine {pc_ = pc + 4, codes_ = S.update addr val codes}
-         in case decodeInstruction $ S.index codes pc of
+                  machine {pc_ = pc + 4, codes_ = M.insert addr val codes}
+         in case decodeInstruction (readMem pc) of
               Right (Add aMode bMode) -> runWith (+) aMode bMode
               Right (Multiply aMode bMode) -> runWith (*) aMode bMode
               Right Halt -> Halted Done
@@ -119,9 +120,9 @@ run originalInputs program =
                       case inputs of
                         x:xs -> (x, xs)
                         [] -> (0, [])
-                    addr = S.index codes $ pc + 1
+                    addr = readMem $ pc + 1
                  in runHelp newInputs $
-                    machine {pc_ = pc + 2, codes_ = S.update addr input codes}
+                    machine {pc_ = pc + 2, codes_ = M.insert addr input codes}
               Right (Output oMode) -> do
                 let output = readWithMode oMode (pc + 1)
                  in PausedAtOutput output $ machine {pc_ = pc + 2}
@@ -131,7 +132,7 @@ run originalInputs program =
               Right (Equals aMode bMode) -> compareWith (==) aMode bMode
               Right UpdateBase ->
                 runHelp inputs $
-                machine {pc_ = pc + 2, base_ = base + (S.index codes $ pc + 1)}
+                machine {pc_ = pc + 2, base_ = base + (readMem $ pc + 1)}
               Left badCode -> Halted $ BadCode badCode
    in case program of
         PausedAtOutput _ machine -> runHelp originalInputs machine
@@ -147,17 +148,27 @@ runToCompletion inputs =
           Halted _ -> outputsSoFar
    in runHelp []
 
-part1 :: S.Seq Int -> IO ()
+part1 :: [Int] -> IO ()
 part1 code = print $ runToCompletion [1] (fromCodes code)
 
+-- part1 :: [Int] -> Int
+-- part1 code =
+--   let runAmplifiers program =
+--         let runAmp output setting =
+--               case run [setting, output] program of
+--                 Halted (BadCode _) -> -3
+--                 Halted Done -> -2
+--                 PausedAtOutput value _ -> value
+--                 Unstarted _ -> -1
+--          in foldl runAmp 0
+--    in maximum $ runAmplifiers (fromCodes code) <$> permutations [0 .. 4]
 main :: IO ()
 main = do
   let readCode t = fst <$> signed decimal t
   parsedCodes <-
-    fmap S.fromList <$> traverse readCode <$> T.splitOn "," <$>
-    readFile "Day9-input.txt"
+    traverse readCode <$> T.splitOn "," <$> readFile "Day9-input.txt"
   case parsedCodes of
     Left _ -> putText "Failed to parse codes."
     Right codes -> do
-      putText $ "Part 1: "
       part1 codes
+      -- putText $ "Part 1: " <> (show $ part1 codes)
