@@ -2,7 +2,6 @@
 {- stack script --resolver lts-14.16 --ghc-options -Wall -}
 {-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
 
-import Control.Monad (fail)
 import qualified Data.Sequence as S
 import qualified Data.Text as T
 import Data.Text.Read (decimal, signed)
@@ -29,6 +28,19 @@ data Instruction
            PMode
   | Halt
 
+data Program
+  = PausedAtOutput Int
+                   (Int, S.Seq Int) -- (PC, Codes)
+  | Unstarted (S.Seq Int)
+  | Halted
+  | BadCode Int
+
+isHalted :: Program -> Bool
+isHalted program =
+  case program of
+    Halted -> True
+    _ -> False
+
 decodeInstruction :: Int -> Either Int Instruction
 decodeInstruction i =
   let mode :: Int -> PMode
@@ -48,9 +60,9 @@ decodeInstruction i =
         99 -> Right Halt
         badCode -> Left badCode
 
-run :: [Int] -> S.Seq Int -> (S.Seq Int, [Int])
-run originalInputs =
-  let runHelp pc inputs outputs codes =
+run :: [Int] -> Program -> Program
+run originalInputs program =
+  let runHelp pc inputs codes =
         let readWithMode mode pos =
               let val = S.index codes pos
                in case mode of
@@ -60,7 +72,7 @@ run originalInputs =
               let inputA = readWithMode aMode $ pc + 1
                   inputB = readWithMode bMode $ pc + 2
                   output = S.index codes $ pc + 3
-               in runHelp (pc + 4) inputs outputs $
+               in runHelp (pc + 4) inputs $
                   S.update output (f inputA inputB) codes
             jumpWith f aMode jMode =
               let val = readWithMode aMode (pc + 1)
@@ -68,7 +80,7 @@ run originalInputs =
                     if f val
                       then readWithMode jMode (pc + 2)
                       else pc + 3
-               in runHelp nextPC inputs outputs codes
+               in runHelp nextPC inputs codes
             compareWith f aMode bMode =
               let val =
                     if (readWithMode aMode (pc + 1) `f`
@@ -76,40 +88,61 @@ run originalInputs =
                       then 1
                       else 0
                   addr = S.index codes $ pc + 3
-               in runHelp (pc + 4) inputs outputs $ S.update addr val codes
+               in runHelp (pc + 4) inputs $ S.update addr val codes
          in case decodeInstruction $ S.index codes pc of
               Right (Add aMode bMode) -> runWith (+) aMode bMode
               Right (Multiply aMode bMode) -> runWith (*) aMode bMode
-              Right Halt -> (codes, outputs)
+              Right Halt -> Halted
               Right Save ->
                 let (input, newInputs) =
                       case inputs of
                         x:xs -> (x, xs)
                         [] -> (0, [])
                     addr = S.index codes $ pc + 1
-                 in runHelp (pc + 2) newInputs outputs $
-                    S.update addr input codes
+                 in runHelp (pc + 2) newInputs $ S.update addr input codes
               Right (Output oMode) -> do
                 let output = readWithMode oMode (pc + 1)
-                 in runHelp (pc + 2) inputs (outputs <> [output]) codes
+                 in PausedAtOutput output (pc + 2, codes)
               Right (JumpIfTrue aMode jMode) -> jumpWith ((/=) 0) aMode jMode
               Right (JumpIfFalse aMode jMode) -> jumpWith ((==) 0) aMode jMode
               Right (LessThan aMode bMode) -> compareWith (<) aMode bMode
               Right (Equals aMode bMode) -> compareWith (==) aMode bMode
-              Left badCode -> fail $ "Hit a bad code: " <> (show badCode)
-   in runHelp 0 originalInputs []
-
-runAmplifiers :: S.Seq Int -> [Int] -> Int
-runAmplifiers codes =
-  let runAmp output setting =
-        fromMaybe 0 $ lastMay $ snd $ run [setting, output] codes
-   in foldl runAmp 0
+              Left badCode -> BadCode badCode
+   in case program of
+        PausedAtOutput _ (pc, codes) -> runHelp pc originalInputs codes
+        Unstarted codes -> runHelp 0 originalInputs codes
+        Halted -> Halted
+        BadCode code -> BadCode code
 
 part1 :: S.Seq Int -> Int
-part1 code = maximum $ runAmplifiers code <$> permutations [0 .. 4]
+part1 code =
+  let runAmplifiers program =
+        let runAmp output setting =
+              case run [setting, output] program of
+                Halted -> -1
+                BadCode _ -> -1
+                PausedAtOutput value _ -> value
+                Unstarted _ -> -1
+         in foldl runAmp 0
+   in maximum $ runAmplifiers (Unstarted code) <$> permutations [0 .. 4]
 
 part2 :: S.Seq Int -> Int
-part2 code = maximum $ runAmplifiers code <$> permutations [0 .. 4]
+part2 codes =
+  let runAmp output (setting, amp) =
+        let result = run (catMaybes [setting, output]) amp
+         in case result of
+              Halted -> (output, (Nothing, result))
+              Unstarted _ -> (output, (Nothing, result))
+              BadCode _ -> (output, (Nothing, result))
+              PausedAtOutput value _ -> (Just value, (Nothing, result))
+      runCycle output amps =
+        let (lastOutput, newAmps) = mapAccumL runAmp output amps
+         in if all (isHalted . snd) newAmps
+              then lastOutput
+              else runCycle lastOutput newAmps
+      thrusterSignal settings =
+        runCycle Nothing $ zip (Just <$> settings) (repeat $ Unstarted codes)
+   in maximum $ catMaybes $ thrusterSignal <$> permutations [5 .. 9]
 
 main :: IO ()
 main = do
