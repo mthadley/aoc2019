@@ -32,13 +32,16 @@ data Program
   = PausedAtOutput Int
                    (Int, S.Seq Int) -- (PC, Codes)
   | Unstarted (S.Seq Int)
-  | Halted
+  | Halted Reason
+
+data Reason
+  = Done
   | BadCode Int
 
 isHalted :: Program -> Bool
 isHalted program =
   case program of
-    Halted -> True
+    Halted _ -> True
     _ -> False
 
 decodeInstruction :: Int -> Either Int Instruction
@@ -92,7 +95,7 @@ run originalInputs program =
          in case decodeInstruction $ S.index codes pc of
               Right (Add aMode bMode) -> runWith (+) aMode bMode
               Right (Multiply aMode bMode) -> runWith (*) aMode bMode
-              Right Halt -> Halted
+              Right Halt -> Halted Done
               Right Save ->
                 let (input, newInputs) =
                       case inputs of
@@ -107,20 +110,18 @@ run originalInputs program =
               Right (JumpIfFalse aMode jMode) -> jumpWith ((==) 0) aMode jMode
               Right (LessThan aMode bMode) -> compareWith (<) aMode bMode
               Right (Equals aMode bMode) -> compareWith (==) aMode bMode
-              Left badCode -> BadCode badCode
+              Left badCode -> Halted $ BadCode badCode
    in case program of
         PausedAtOutput _ (pc, codes) -> runHelp pc originalInputs codes
         Unstarted codes -> runHelp 0 originalInputs codes
-        Halted -> Halted
-        BadCode code -> BadCode code
+        Halted reason -> Halted reason
 
 part1 :: S.Seq Int -> Int
 part1 code =
   let runAmplifiers program =
         let runAmp output setting =
               case run [setting, output] program of
-                Halted -> -1
-                BadCode _ -> -1
+                Halted _ -> -1
                 PausedAtOutput value _ -> value
                 Unstarted _ -> -1
          in foldl runAmp 0
@@ -131,9 +132,8 @@ part2 codes =
   let runAmp output (setting, amp) =
         let result = run (catMaybes [setting, output]) amp
          in case result of
-              Halted -> (output, (Nothing, result))
+              Halted _ -> (output, (Nothing, result))
               Unstarted _ -> (output, (Nothing, result))
-              BadCode _ -> (output, (Nothing, result))
               PausedAtOutput value _ -> (Just value, (Nothing, result))
       runCycle output amps =
         let (lastOutput, newAmps) = mapAccumL runAmp output amps
