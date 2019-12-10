@@ -27,27 +27,28 @@ data Instruction
              PMode
   | Equals PMode
            PMode
-  | UpdateBase
+  | UpdateBase PMode
   | Halt
 
 data Program
-  = PausedAtOutput Int
+  = PausedAtOutput Integer
                    Machine
   | Unstarted Machine
   | Halted Reason
 
 data Machine = Machine
-  { pc_ :: Int
-  , base_ :: Int
-  , codes_ :: M.Map Int Int
+  { pc_ :: Integer
+  , base_ :: Integer
+  , inputs_ :: [Integer]
+  , codes_ :: M.Map Integer Integer
   }
 
-fromCodes :: [Int] -> Program
-fromCodes = Unstarted . Machine 0 0 . M.fromList . zipWith (,) [0 ..]
+fromCodes :: [Integer] -> Program
+fromCodes = Unstarted . Machine 0 0 [] . M.fromList . zipWith (,) [0 ..]
 
 data Reason
   = Done
-  | BadCode Int
+  | BadCode Integer
 
 isHalted :: Program -> Bool
 isHalted program =
@@ -55,9 +56,9 @@ isHalted program =
     Halted _ -> True
     _ -> False
 
-decodeInstruction :: Int -> Either Int Instruction
+decodeInstruction :: Integer -> Either Integer Instruction
 decodeInstruction i =
-  let mode :: Int -> PMode
+  let mode :: Integer -> PMode
       mode p =
         case i `div` (10 ^ (p + 1)) `mod` 10 of
           0 -> Position
@@ -72,25 +73,25 @@ decodeInstruction i =
         6 -> Right $ JumpIfFalse (mode 1) (mode 2)
         7 -> Right $ LessThan (mode 1) (mode 2)
         8 -> Right $ Equals (mode 1) (mode 2)
-        9 -> Right $ UpdateBase
+        9 -> Right $ UpdateBase (mode 1)
         99 -> Right Halt
         badCode -> Left badCode
 
-run :: [Int] -> Program -> Program
+run :: [Integer] -> Program -> Program
 run originalInputs program =
-  let runHelp inputs machine@(Machine pc base codes) =
+  let runHelp machine@(Machine pc base inputs codes) =
         let readMem pos = fromMaybe 0 $ M.lookup pos codes
             readWithMode mode pos =
               let val = readMem pos
                in case mode of
                     Position -> readMem val
                     Immediate -> val
-                    Relative -> readMem (val + base)
+                    Relative -> readMem $ val + base
             runWith f aMode bMode =
               let inputA = readWithMode aMode $ pc + 1
                   inputB = readWithMode bMode $ pc + 2
                   output = readMem $ pc + 3
-               in runHelp inputs $
+               in runHelp $
                   machine
                     { pc_ = pc + 4
                     , codes_ = M.insert output (f inputA inputB) codes
@@ -101,7 +102,7 @@ run originalInputs program =
                     if f val
                       then readWithMode jMode (pc + 2)
                       else pc + 3
-               in runHelp inputs $ machine {pc_ = nextPC}
+               in runHelp $ machine {pc_ = nextPC}
             compareWith f aMode bMode =
               let val =
                     if (readWithMode aMode (pc + 1) `f`
@@ -109,7 +110,7 @@ run originalInputs program =
                       then 1
                       else 0
                   addr = readMem $ pc + 3
-               in runHelp inputs $
+               in runHelp $
                   machine {pc_ = pc + 4, codes_ = M.insert addr val codes}
          in case decodeInstruction (readMem pc) of
               Right (Add aMode bMode) -> runWith (+) aMode bMode
@@ -121,8 +122,12 @@ run originalInputs program =
                         x:xs -> (x, xs)
                         [] -> (0, [])
                     addr = readMem $ pc + 1
-                 in runHelp newInputs $
-                    machine {pc_ = pc + 2, codes_ = M.insert addr input codes}
+                 in runHelp $
+                    machine
+                      { inputs_ = newInputs
+                      , pc_ = pc + 2
+                      , codes_ = M.insert addr input codes
+                      }
               Right (Output oMode) -> do
                 let output = readWithMode oMode (pc + 1)
                  in PausedAtOutput output $ machine {pc_ = pc + 2}
@@ -130,29 +135,34 @@ run originalInputs program =
               Right (JumpIfFalse aMode jMode) -> jumpWith ((==) 0) aMode jMode
               Right (LessThan aMode bMode) -> compareWith (<) aMode bMode
               Right (Equals aMode bMode) -> compareWith (==) aMode bMode
-              Right UpdateBase ->
-                runHelp inputs $
-                machine {pc_ = pc + 2, base_ = base + (readMem $ pc + 1)}
+              Right (UpdateBase aMode) ->
+                let newBase = base + (readWithMode aMode $ pc + 1)
+                 in runHelp $ machine {pc_ = pc + 2, base_ = newBase}
               Left badCode -> Halted $ BadCode badCode
    in case program of
-        PausedAtOutput _ machine -> runHelp originalInputs machine
-        Unstarted machine -> runHelp originalInputs machine
+        PausedAtOutput _ machine ->
+          runHelp $ machine {inputs_ = inputs_ machine <> originalInputs}
+        Unstarted machine ->
+          runHelp $ machine {inputs_ = inputs_ machine <> originalInputs}
         Halted reason -> Halted reason
 
-runToCompletion :: [Int] -> Program -> [Int]
-runToCompletion inputs =
-  let runHelp outputsSoFar program =
-        case run inputs program of
-          PausedAtOutput value _ -> runHelp (outputsSoFar ++ [value]) program
-          Unstarted _ -> runHelp outputsSoFar program
-          Halted _ -> outputsSoFar
-   in runHelp []
+runToCompletion :: [Integer] -> Program -> [Integer]
+runToCompletion originalInputs =
+  let runHelp inputs outputsSoFar program =
+        let newProgram = run inputs program
+         in case newProgram of
+              PausedAtOutput value _ ->
+                runHelp [] (outputsSoFar ++ [value]) newProgram
+              Unstarted _ -> runHelp [] outputsSoFar newProgram
+              Halted _ -> outputsSoFar
+   in runHelp originalInputs []
 
-part1 :: [Int] -> IO ()
+-- 203 - Too low
+part1 :: [Integer] -> IO ()
 part1 code = print $ runToCompletion [1] (fromCodes code)
 
--- part1 :: [Int] -> Int
--- part1 code =
+-- part1Old :: [Integer] -> Integer
+-- part1Old code =
 --   let runAmplifiers program =
 --         let runAmp output setting =
 --               case run [setting, output] program of
@@ -170,5 +180,6 @@ main = do
   case parsedCodes of
     Left _ -> putText "Failed to parse codes."
     Right codes -> do
+      putText "Part 1:"
       part1 codes
-      -- putText $ "Part 1: " <> (show $ part1 codes)
+      -- putText $ "Part 1 old: " <> (show $ part1Old codes)
