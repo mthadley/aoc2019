@@ -184,8 +184,8 @@ runToCompletion originalInputs =
               Halted _ -> outputsSoFar
    in runHelp originalInputs []
 
-part1 :: [Integer] -> [Integer]
-part1 code = runToCompletion [23] (fromCodes code)
+part1 :: [Integer] -> Integer
+part1 code = fromMaybe (-1) $ head $ runToCompletion [1] (fromCodes code)
 
 main :: IO ()
 main = do
@@ -195,14 +195,4 @@ main = do
   case parsedCodes of
     Left _ -> putText "Failed to parse codes."
     Right codes -> do
-      putText "Part 1:"
-      print $ part1 codes
-      print $ part1 [109, -1, 4, 1, 99] == [-1]
-      print $ part1 [109, -1, 4, 1, 99] == [-1]
-      print $ part1 [109, -1, 104, 1, 99] == [1]
-      print $ part1 [109, -1, 204, 1, 99] == [109]
-      print $ part1 [109, 1, 9, 2, 204, -6, 99] == [204]
-      print $ part1 [109, 1, 109, 9, 204, -6, 99] == [204]
-      print $ part1 [109, 1, 209, -1, 204, -106, 99] == [204]
-      print $ part1 [109, 1, 3, 3, 204, 2, 99] == [23]
-      print $ part1 [109, 1, 203, 2, 204, 2, 99] == [23]
+      putText $ "Part 1:" <> (show $ part1 codes)
