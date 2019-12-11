@@ -11,12 +11,10 @@ data PMode
   = Position
   | Immediate
   | Relative
-  deriving (Show)
 
 data WMode
   = WPosition
   | WRelative
-  deriving (Show)
 
 data Instruction
   = Add PMode
@@ -39,26 +37,23 @@ data Instruction
            WMode
   | UpdateBase PMode
   | Halt
-  deriving (Show)
 
 data Program
   = PausedAtOutput Integer
                    Machine
   | Unstarted Machine
   | Halted Reason
-  deriving (Show)
 
 data Machine = Machine
   { pc_ :: Integer
   , base_ :: Integer
   , inputs_ :: [Integer]
   , codes_ :: M.Map Integer Integer
-  } deriving (Show)
+  }
 
 data Reason
   = Done
   | BadCode Integer
-  deriving (Show)
 
 fromCodes :: [Integer] -> Program
 fromCodes = Unstarted . Machine 0 0 [] . M.fromList . zipWith (,) [0 ..]
@@ -184,8 +179,9 @@ runToCompletion originalInputs =
               Halted _ -> outputsSoFar
    in runHelp originalInputs []
 
-part1 :: [Integer] -> Integer
-part1 code = fromMaybe (-1) $ head $ runToCompletion [1] (fromCodes code)
+getOutput :: [Integer] -> [Integer] -> Integer
+getOutput inputs code =
+  fromMaybe (-1) $ head $ runToCompletion inputs (fromCodes code)
 
 main :: IO ()
 main = do
@@ -195,4 +191,5 @@ main = do
   case parsedCodes of
     Left _ -> putText "Failed to parse codes."
     Right codes -> do
-      putText $ "Part 1:" <> (show $ part1 codes)
+      putText $ "Part 1:" <> (show $ getOutput [1] codes)
+      putText $ "Part 2:" <> (show $ getOutput [2] codes)
