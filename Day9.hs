@@ -13,14 +13,19 @@ data PMode
   | Relative
   deriving (Show)
 
+data WMode
+  = WPosition
+  | WRelative
+  deriving (Show)
+
 data Instruction
   = Add PMode
         PMode
-        PMode
+        WMode
   | Multiply PMode
              PMode
-             PMode
-  | Save PMode
+             WMode
+  | Save WMode
   | Output PMode
   | JumpIfTrue PMode
                PMode
@@ -28,10 +33,10 @@ data Instruction
                 PMode
   | LessThan PMode
              PMode
-             PMode
+             WMode
   | Equals PMode
            PMode
-           PMode
+           WMode
   | UpdateBase PMode
   | Halt
   deriving (Show)
@@ -66,21 +71,27 @@ isHalted program =
 
 decodeInstruction :: Integer -> Either Integer Instruction
 decodeInstruction i =
-  let mode :: Integer -> PMode
+  let modeCode p = i `div` (10 ^ (p + 1)) `mod` 10
+      mode :: Integer -> PMode
       mode p =
-        case i `div` (10 ^ (p + 1)) `mod` 10 of
-          0 -> Position
+        case modeCode p of
           1 -> Immediate
-          _ -> Relative -- Mode 2
+          2 -> Relative
+          _ -> Position -- Mode 0
+      wmode :: Integer -> WMode
+      wmode p =
+        case modeCode p of
+          2 -> WRelative
+          _ -> WPosition -- Mode 0
    in case i `mod` 100 of
-        1 -> Right $ Add (mode 1) (mode 2) (mode 3)
-        2 -> Right $ Multiply (mode 1) (mode 2) (mode 3)
-        3 -> Right $ Save (mode 1)
+        1 -> Right $ Add (mode 1) (mode 2) (wmode 3)
+        2 -> Right $ Multiply (mode 1) (mode 2) (wmode 3)
+        3 -> Right $ Save (wmode 1)
         4 -> Right $ Output (mode 1)
         5 -> Right $ JumpIfTrue (mode 1) (mode 2)
         6 -> Right $ JumpIfFalse (mode 1) (mode 2)
-        7 -> Right $ LessThan (mode 1) (mode 2) (mode 3)
-        8 -> Right $ Equals (mode 1) (mode 2) (mode 3)
+        7 -> Right $ LessThan (mode 1) (mode 2) (wmode 3)
+        8 -> Right $ Equals (mode 1) (mode 2) (wmode 3)
         9 -> Right $ UpdateBase (mode 1)
         99 -> Right Halt
         badCode -> Left badCode
@@ -95,10 +106,15 @@ run originalInputs program =
                     Position -> readMem val
                     Immediate -> val
                     Relative -> readMem (base + val)
+            readWithModeForWrite oMode pos =
+              let val = readMem pos
+               in case oMode of
+                    WPosition -> val
+                    WRelative -> base + val
             runWith f aMode bMode oMode =
               let inputA = readWithMode aMode $ pc + 1
                   inputB = readWithMode bMode $ pc + 2
-                  output = readWithMode oMode $ pc + 3
+                  output = readWithModeForWrite oMode $ pc + 3
                in runHelp $
                   machine
                     { pc_ = pc + 4
@@ -117,7 +133,7 @@ run originalInputs program =
                         readWithMode bMode (pc + 2))
                       then 1
                       else 0
-                  addr = readWithMode oMode $ pc + 3
+                  addr = readWithModeForWrite oMode $ pc + 3
                in runHelp $
                   machine {pc_ = pc + 4, codes_ = M.insert addr val codes}
          in case decodeInstruction (readMem pc) of
@@ -130,13 +146,7 @@ run originalInputs program =
                       case inputs of
                         x:xs -> (x, xs)
                         [] -> (0, [])
-                    addr
-                      -- https://www.reddit.com/r/adventofcode/comments/e8aw9j/2019_day_9_part_1_how_to_fix_203_error/
-                     =
-                      case oMode of
-                        Position -> readMem $ pc + 1
-                        Immediate -> readMem $ pc + 1
-                        Relative -> base + (readMem $ pc + 1)
+                    addr = readWithModeForWrite oMode $ pc + 1
                  in runHelp $
                     machine
                       { inputs_ = newInputs
