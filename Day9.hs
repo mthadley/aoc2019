@@ -11,13 +11,16 @@ data PMode
   = Position
   | Immediate
   | Relative
+  deriving (Show)
 
 data Instruction
   = Add PMode
         PMode
+        PMode
   | Multiply PMode
              PMode
-  | Save
+             PMode
+  | Save PMode
   | Output PMode
   | JumpIfTrue PMode
                PMode
@@ -25,30 +28,35 @@ data Instruction
                 PMode
   | LessThan PMode
              PMode
+             PMode
   | Equals PMode
+           PMode
            PMode
   | UpdateBase PMode
   | Halt
+  deriving (Show)
 
 data Program
   = PausedAtOutput Integer
                    Machine
   | Unstarted Machine
   | Halted Reason
+  deriving (Show)
 
 data Machine = Machine
   { pc_ :: Integer
   , base_ :: Integer
   , inputs_ :: [Integer]
   , codes_ :: M.Map Integer Integer
-  }
-
-fromCodes :: [Integer] -> Program
-fromCodes = Unstarted . Machine 0 0 [] . M.fromList . zipWith (,) [0 ..]
+  } deriving (Show)
 
 data Reason
   = Done
   | BadCode Integer
+  deriving (Show)
+
+fromCodes :: [Integer] -> Program
+fromCodes = Unstarted . Machine 0 0 [] . M.fromList . zipWith (,) [0 ..]
 
 isHalted :: Program -> Bool
 isHalted program =
@@ -65,14 +73,14 @@ decodeInstruction i =
           1 -> Immediate
           _ -> Relative -- Mode 2
    in case i `mod` 100 of
-        1 -> Right $ Add (mode 1) (mode 2)
-        2 -> Right $ Multiply (mode 1) (mode 2)
-        3 -> Right $ Save
+        1 -> Right $ Add (mode 1) (mode 2) (mode 3)
+        2 -> Right $ Multiply (mode 1) (mode 2) (mode 3)
+        3 -> Right $ Save (mode 1)
         4 -> Right $ Output (mode 1)
         5 -> Right $ JumpIfTrue (mode 1) (mode 2)
         6 -> Right $ JumpIfFalse (mode 1) (mode 2)
-        7 -> Right $ LessThan (mode 1) (mode 2)
-        8 -> Right $ Equals (mode 1) (mode 2)
+        7 -> Right $ LessThan (mode 1) (mode 2) (mode 3)
+        8 -> Right $ Equals (mode 1) (mode 2) (mode 3)
         9 -> Right $ UpdateBase (mode 1)
         99 -> Right Halt
         badCode -> Left badCode
@@ -86,11 +94,11 @@ run originalInputs program =
                in case mode of
                     Position -> readMem val
                     Immediate -> val
-                    Relative -> readMem $ val + base
-            runWith f aMode bMode =
+                    Relative -> readMem (base + val)
+            runWith f aMode bMode oMode =
               let inputA = readWithMode aMode $ pc + 1
                   inputB = readWithMode bMode $ pc + 2
-                  output = readMem $ pc + 3
+                  output = readWithMode oMode $ pc + 3
                in runHelp $
                   machine
                     { pc_ = pc + 4
@@ -103,25 +111,32 @@ run originalInputs program =
                       then readWithMode jMode (pc + 2)
                       else pc + 3
                in runHelp $ machine {pc_ = nextPC}
-            compareWith f aMode bMode =
+            compareWith f aMode bMode oMode =
               let val =
                     if (readWithMode aMode (pc + 1) `f`
                         readWithMode bMode (pc + 2))
                       then 1
                       else 0
-                  addr = readMem $ pc + 3
+                  addr = readWithMode oMode $ pc + 3
                in runHelp $
                   machine {pc_ = pc + 4, codes_ = M.insert addr val codes}
          in case decodeInstruction (readMem pc) of
-              Right (Add aMode bMode) -> runWith (+) aMode bMode
-              Right (Multiply aMode bMode) -> runWith (*) aMode bMode
+              Right (Add aMode bMode oMode) -> runWith (+) aMode bMode oMode
+              Right (Multiply aMode bMode oMode) ->
+                runWith (*) aMode bMode oMode
               Right Halt -> Halted Done
-              Right Save ->
+              Right (Save oMode) ->
                 let (input, newInputs) =
                       case inputs of
                         x:xs -> (x, xs)
                         [] -> (0, [])
-                    addr = readMem $ pc + 1
+                    addr
+                      -- https://www.reddit.com/r/adventofcode/comments/e8aw9j/2019_day_9_part_1_how_to_fix_203_error/
+                     =
+                      case oMode of
+                        Position -> readMem $ pc + 1
+                        Immediate -> readMem $ pc + 1
+                        Relative -> base + (readMem $ pc + 1)
                  in runHelp $
                     machine
                       { inputs_ = newInputs
@@ -133,8 +148,10 @@ run originalInputs program =
                  in PausedAtOutput output $ machine {pc_ = pc + 2}
               Right (JumpIfTrue aMode jMode) -> jumpWith ((/=) 0) aMode jMode
               Right (JumpIfFalse aMode jMode) -> jumpWith ((==) 0) aMode jMode
-              Right (LessThan aMode bMode) -> compareWith (<) aMode bMode
-              Right (Equals aMode bMode) -> compareWith (==) aMode bMode
+              Right (LessThan aMode bMode oMode) ->
+                compareWith (<) aMode bMode oMode
+              Right (Equals aMode bMode oMode) ->
+                compareWith (==) aMode bMode oMode
               Right (UpdateBase aMode) ->
                 let newBase = base + (readWithMode aMode $ pc + 1)
                  in runHelp $ machine {pc_ = pc + 2, base_ = newBase}
@@ -157,21 +174,9 @@ runToCompletion originalInputs =
               Halted _ -> outputsSoFar
    in runHelp originalInputs []
 
--- 203 - Too low
-part1 :: [Integer] -> IO ()
-part1 code = print $ runToCompletion [1] (fromCodes code)
+part1 :: [Integer] -> [Integer]
+part1 code = runToCompletion [23] (fromCodes code)
 
--- part1Old :: [Integer] -> Integer
--- part1Old code =
---   let runAmplifiers program =
---         let runAmp output setting =
---               case run [setting, output] program of
---                 Halted (BadCode _) -> -3
---                 Halted Done -> -2
---                 PausedAtOutput value _ -> value
---                 Unstarted _ -> -1
---          in foldl runAmp 0
---    in maximum $ runAmplifiers (fromCodes code) <$> permutations [0 .. 4]
 main :: IO ()
 main = do
   let readCode t = fst <$> signed decimal t
@@ -181,5 +186,13 @@ main = do
     Left _ -> putText "Failed to parse codes."
     Right codes -> do
       putText "Part 1:"
-      part1 codes
-      -- putText $ "Part 1 old: " <> (show $ part1Old codes)
+      print $ part1 codes
+      print $ part1 [109, -1, 4, 1, 99] == [-1]
+      print $ part1 [109, -1, 4, 1, 99] == [-1]
+      print $ part1 [109, -1, 104, 1, 99] == [1]
+      print $ part1 [109, -1, 204, 1, 99] == [109]
+      print $ part1 [109, 1, 9, 2, 204, -6, 99] == [204]
+      print $ part1 [109, 1, 109, 9, 204, -6, 99] == [204]
+      print $ part1 [109, 1, 209, -1, 204, -106, 99] == [204]
+      print $ part1 [109, 1, 3, 3, 204, 2, 99] == [23]
+      print $ part1 [109, 1, 203, 2, 204, 2, 99] == [23]
