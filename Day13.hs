@@ -1,12 +1,15 @@
 #!/usr/bin/env stack
 {- stack script --resolver lts-14.16 --ghc-options -Wall -}
-{-# LANGUAGE NoImplicitPrelude, OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude, OverloadedStrings,
+  MultiParamTypeClasses #-}
 
+import Control.Concurrent (threadDelay)
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Text as T
 import Data.Text.Read (decimal, signed)
 import Protolude
+import qualified System.Console.ANSI as Console
 
 data PMode
   = Position
@@ -170,55 +173,90 @@ data Tile
   | Ball
   deriving (Enum, Eq)
 
+instance StringConv Tile Text where
+  strConv _ tile =
+    case tile of
+      Empty -> " "
+      Wall -> "W"
+      Block -> "B"
+      Paddle -> "_"
+      Ball -> "o"
+
 data Game = Game
   { program_ :: Program
   , tiles_ :: Map Point Tile
   , outputsSoFar_ :: [Integer]
+  , finishedFirstPaint_ :: Bool
+  , ballPosition_ :: Point
+  , paddlePosition_ :: Point
   }
-
-printScreen :: Map Point Tile -> IO ()
-printScreen squares =
-  let points = M.keys squares
-      minX = minimum $ fst <$> points
-      minY = minimum $ snd <$> points
-      maxX = maximum $ fst <$> points
-      maxY = maximum $ snd <$> points
-      tileToChar (x, y) =
-        case fromMaybe Empty $ M.lookup (x, y) squares of
-          Empty -> ' '
-          Wall -> 'W'
-          Block -> 'B'
-          Paddle -> '_'
-          Ball -> '*'
-      prettyLines =
-        fmap
-          (\y -> fmap (\x -> tileToChar (x, y)) [minX .. maxX])
-          [maxY,maxY - 1 .. minY]
-   in putText $ T.unlines $ toS <$> prettyLines
 
 readJoystick :: IO (Maybe Integer)
 readJoystick = pure Nothing
 
 runGame :: [Integer] -> IO ()
 runGame codes = do
-  let step game@(Game program tiles outputsSoFar) = do
-        continue <- run readJoystick program
+  let step game@(Game program tiles outputsSoFar finishedFirstPaint ballPosition paddlePosition) = do
+        continue <- run (pure Nothing) program
         case (program, outputsSoFar) of
           (Unstarted _, _) -> step $ game {program_ = continue}
           (PausedAtOutput output _, _:[]) ->
             step $
             game {program_ = continue, outputsSoFar_ = outputsSoFar ++ [output]}
-          (PausedAtOutput tileCode _, x:y:[]) -> do
-            let newTiles =
-                  M.insert (x, y) (toEnum $ fromIntegral tileCode) tiles
-            printScreen newTiles
+          (PausedAtOutput newScore _, -1:0:[]) -> do
+            Console.setCursorPosition 0 0
+            putText $ "Score: " <> (show newScore)
             step $
-              game {program_ = continue, outputsSoFar_ = [], tiles_ = newTiles}
+              game
+                { program_ = continue
+                , outputsSoFar_ = []
+                , finishedFirstPaint_ = True
+                }
+          (PausedAtOutput tileCode _, x:y:[]) -> do
+            let tile = toEnum $ fromIntegral tileCode :: Tile
+            let newBallPosition =
+                  case tile of
+                    Ball -> (x, y)
+                    _ -> ballPosition
+            let newPaddlePosition =
+                  case tile of
+                    Paddle -> (x, y)
+                    _ -> paddlePosition
+            let input =
+                  case (fst newBallPosition) `compare` (fst newPaddlePosition) of
+                    GT -> 1
+                    LT -> -1
+                    EQ -> 0
+            Console.setCursorPosition (fromIntegral (y + 1)) (fromIntegral x)
+            putText $ toS tile
+            threadDelay $
+              if finishedFirstPaint
+                then 50
+                else 0
+            nextMachine <- run (pure $ Just input) program
+            step $
+              game
+                { program_ = nextMachine
+                , outputsSoFar_ = []
+                , ballPosition_ = newBallPosition
+                , paddlePosition_ = newPaddlePosition
+                }
           (PausedAtOutput output _, _) ->
             step $
             game {program_ = continue, outputsSoFar_ = outputsSoFar ++ [output]}
           (Halted _, _) -> pure ()
-  step $ Game {program_ = fromCodes codes, tiles_ = M.empty, outputsSoFar_ = []}
+  Console.clearScreen
+  Console.hideCursor
+  step $
+    Game
+      { program_ = fromCodes codes
+      , tiles_ = M.empty
+      , outputsSoFar_ = []
+      , finishedFirstPaint_ = False
+      , ballPosition_ = (0, 0)
+      , paddlePosition_ = (0, 0)
+      }
+  Console.showCursor
 
 main :: IO ()
 main = do
@@ -227,4 +265,4 @@ main = do
     traverse readCode <$> T.splitOn "," <$> readFile "Day13-input.txt"
   case parsedCodes of
     Left _ -> putText "Failed to parse codes."
-    Right codes -> runGame codes
+    Right codes -> runGame $ [2] ++ (drop 1 codes)
