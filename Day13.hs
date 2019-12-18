@@ -191,9 +191,6 @@ data Game = Game
   , paddlePosition_ :: Point
   }
 
-readJoystick :: IO (Maybe Integer)
-readJoystick = pure Nothing
-
 runGame :: [Integer] -> IO ()
 runGame codes = do
   let step game@(Game program tiles outputsSoFar finishedFirstPaint ballPosition paddlePosition) = do
